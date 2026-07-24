@@ -8,15 +8,82 @@ const SVG_H = 800;
 const PADDING = 20;
 
 // Constantes para o algoritmo de anti-colisão de rótulos
-const LABEL_COLLISION_PADDING = 4; // Espaçamento extra entre rótulos
-const LABEL_FORCE_STRENGTH = 0.08; // Força que "puxa" o rótulo de volta ao seu centroide
+const LABEL_COLLISION_PADDING = 2; // Espaçamento extra entre rótulos
+const LABEL_FORCE_STRENGTH = 0.45; // Força forte que mantém o rótulo próximo ao seu centroide
 const SIMULATION_ITERATIONS = 250; // Número de iterações da simulação
 
+// Paleta de cores moderna e harmoniosa, inspirada nas paisagens e cultura da Bahia.
+// Os tons possuem saturação média e brilho equilibrado para garantir contraste e elegância.
 const TERRITORY_COLORS = [
-    '#E03C5A', '#F9A03F', '#C3D471', '#149BDB', '#86CBA0', '#E53B94', '#B94B85',
-    '#B57753', '#CFBE5C', '#1AB2ED', '#B0AD23', '#1A9F9E', '#ED7D31', '#9CC14A',
-    '#8786AD', '#12A759', '#4EC1D3', '#1C9395', '#FAC637', '#9A5B74', '#F6ED70',
-    '#F2A09E', '#3D8576', '#D2C365', '#A7B665', '#B8BAD2', '#BDBBB9',
+    // Tons de Azul e Turquesa (Litoral)
+    '#005f73', // Azul Atlântico Escuro
+    '#0a9396', // Turquesa Escuro
+    '#94d2bd', // Turquesa Médio
+    '#e9d8a6', // Amarelo Areia (transição)
+
+    // Tons de Verde (Mata Atlântica e Chapada)
+    '#1b4332', // Verde Mata Escuro
+    '#2d6a4f', // Verde Mata
+    '#40916c', // Verde Médio
+    '#52b788', // Verde Claro
+    '#74c69d', // Verde Sálvia
+
+    // Tons Terrosos e Dourados (Sertão e Chapada)
+    '#bb9457', // Ocre Dourado
+    '#ca6702', // Laranja Queimado
+    '#c95c50', // Vermelho Terracota Suave
+    '#b5474b', // Vermelho Escuro Suave
+
+    // Tons de Púrpura e Rosa (Cultura, Flores, Pelourinho)
+    '#5a189a', // Roxo Açaí
+    '#7b2cbf', // Roxo Médio
+    '#9d4edd', // Lavanda
+    '#c77dff', // Lilás
+
+    // Cores de Destaque e Preenchimento (Vibrantes mas harmoniosas)
+    '#ee9b00', // Amarelo Dourado Vibrante
+    '#e76f51', // Coral
+    '#f4a261', // Laranja Pêssego
+    '#e5989b', // Rosa Antigo
+    '#b5838d', // Rosa Queimado
+
+    // Cores adicionais para garantir 27 tons distintos
+    '#003049', // Azul Petróleo
+    '#669bbc', // Azul Céu Suave
+    '#7f5539', // Marrom Café
+    '#dda15e', // Caramelo
+    '#d36a6d'  // Vermelho Cereja Suave
+];
+
+// Ordem geográfica dos territórios para uma paleta de cores mais coesa
+const GEOGRAPHICAL_ORDER = [
+    'Bacia do Rio Grande',
+    'Bacia do Rio Corrente',
+    'Velho Chico',
+    'Sertão do São Francisco',
+    'Piemonte Norte do Itapicuru',
+    'Itaparica',
+    'Irecê',
+    'Chapada Diamantina',
+    'Piemonte da Diamantina',
+    'Sisal',
+    'Bacia do Jacuípe',
+    'Semiárido Nordeste II',
+    'Litoral Norte e Agreste Baiano',
+    'Portal do Sertão',
+    'Metropolitano de Salvador',
+    'Recôncavo',
+    'Baixo Sul',
+    'Vale do Jiquiriçá',
+    'Piemonte do Paraguaçu',
+    'Médio Rio de Contas',
+    'Sudoeste Baiano',
+    'Sertão Produtivo',
+    'Bacia do Paramirim',
+    'Médio Sudoeste da Bahia',
+    'Litoral Sul',
+    'Costa do Descobrimento',
+    'Extremo Sul'
 ];
 
 function normalizeName(value) {
@@ -35,9 +102,18 @@ function wrapText(text) {
 
 const getTerritoryKey = (value) => normalizeName(value);
 
+// Ordena os territórios geograficamente antes de atribuir as cores
+const sortedTerritories = [...territoriosMunicipios.territorios_de_identidade].sort((a, b) => {
+    const indexA = GEOGRAPHICAL_ORDER.indexOf(a.nome);
+    const indexB = GEOGRAPHICAL_ORDER.indexOf(b.nome);
+    if (indexA === -1) return 1; // Coloca territórios não listados no final
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+});
+
 const territoryColorMap = {};
-territoriosMunicipios.territorios_de_identidade.forEach((territorio) => {
-    territoryColorMap[getTerritoryKey(territorio.nome)] = TERRITORY_COLORS[territorio.id - 1] || '#E2E8F0';
+sortedTerritories.forEach((territorio, index) => {
+    territoryColorMap[getTerritoryKey(territorio.nome)] = TERRITORY_COLORS[index] || '#D1D5DB'; // gray-300
 });
 
 const buildMunicipioTerritoryMap = () => {
@@ -66,7 +142,7 @@ const getPathD = (geometry, project) => {
 // Componente memoizado para cada polígono de município. Evita re-renderizar
 // os ~400 <path> quando o pai re-renderiza por motivos que não afetam aquele
 // município específico (ex: hover em outro, mudança de tooltip, etc). Como
-// pan/zoom agora são throttled via rAF (ver ConectaMap) e a simulação de
+// pan/zoom agora são throttled via rAF (ver PtiMap) e a simulação de
 // labels não depende mais de effectiveScale, o pai já re-renderiza bem menos —
 // este memo é uma segunda camada de proteção para quando ele ainda re-renderizar.
 const MunicipioPath = React.memo(function MunicipioPath({
@@ -95,10 +171,10 @@ const MunicipioPath = React.memo(function MunicipioPath({
     );
 });
 
-export default function ConectaMap({ 
-    territoriosData = [], territoriesDynamicStats = {}, searchTerm = '', 
-    filtroSemiarido = false, selectedTerritory = null, 
-    onSelectTerritory = () => {}, semiaridoMunicipios = [], darkMode = false
+const PtiMap = React.memo(function PtiMap({
+    territoriosData = [], territoriesDynamicStats = {}, searchTerm = '',
+    filtroSemiarido = false, selectedTerritory = null,
+    onSelectTerritory = () => { }, semiaridoMunicipios = [], darkMode = false
 }) {
     const [mapFeatures, setMapFeatures] = useState([]);
     const [territoryLabels, setTerritoryLabels] = useState([]);
@@ -106,11 +182,12 @@ export default function ConectaMap({
     const [hoveredMunicipality, setHoveredMunicipality] = useState(null);
     const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0 });
     const [loading, setLoading] = useState(true);
-    
+
     const [userScale, setUserScale] = useState(1);
     const [userPan, setUserPan] = useState({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState(false);
-    
+    const [isMunListExpanded, setIsMunListExpanded] = useState(false);
+
     const svgRef = useRef(null);
     const containerRef = useRef(null);
     const lastMousePos = useRef({ x: 0, y: 0 });
@@ -137,7 +214,11 @@ export default function ConectaMap({
         if (rafScaleId.current) cancelAnimationFrame(rafScaleId.current);
     }, []);
 
-    useEffect(() => { setUserScale(1); setUserPan({ x: 0, y: 0 }); }, [selectedTerritory]);
+    useEffect(() => {
+        setUserScale(1);
+        setUserPan({ x: 0, y: 0 });
+        setIsMunListExpanded(false);
+    }, [selectedTerritory]);
 
     useEffect(() => {
         setLoading(true);
@@ -169,18 +250,44 @@ export default function ConectaMap({
                     const tKey = getTerritoryKey(territoryName);
 
                     let fMinX = Infinity, fMaxX = -Infinity, fMinY = Infinity, fMaxY = -Infinity;
+                    let bestCx = 0, bestCy = 0, maxArea = -1;
 
                     if (feat.geometry) {
-                        const coords = feat.geometry.type === 'Polygon' ? feat.geometry.coordinates.flat() : feat.geometry.coordinates.flat(2);
-                        coords.forEach(([x, y]) => {
-                            const [px, py] = project([x, y]);
-                            if (px < fMinX) fMinX = px; if (px > fMaxX) fMaxX = px;
-                            if (py < fMinY) fMinY = py; if (py > fMaxY) fMaxY = py;
+                        let rings = [];
+                        if (feat.geometry.type === 'Polygon') {
+                            rings = [feat.geometry.coordinates[0]];
+                        } else if (feat.geometry.type === 'MultiPolygon') {
+                            rings = feat.geometry.coordinates.map(p => p[0]);
+                        } else {
+                            const coords = feat.geometry.coordinates.flat(2);
+                            rings = [coords];
+                        }
+
+                        rings.forEach(ring => {
+                            if (!ring || ring.length === 0) return;
+                            let rMinX = Infinity, rMaxX = -Infinity, rMinY = Infinity, rMaxY = -Infinity;
+                            let sumX = 0, sumY = 0, count = 0;
+
+                            ring.forEach(([x, y]) => {
+                                const [px, py] = project([x, y]);
+                                if (px < fMinX) fMinX = px; if (px > fMaxX) fMaxX = px;
+                                if (py < fMinY) fMinY = py; if (py > fMaxY) fMaxY = py;
+                                if (px < rMinX) rMinX = px; if (px > rMaxX) rMaxX = px;
+                                if (py < rMinY) rMinY = py; if (py > rMaxY) rMaxY = py;
+                                sumX += px; sumY += py; count++;
+                            });
+
+                            const area = (rMaxX - rMinX) * (rMaxY - rMinY);
+                            if (area > maxArea && count > 0) {
+                                maxArea = area;
+                                bestCx = sumX / count;
+                                bestCy = sumY / count;
+                            }
                         });
                     }
 
-                    const cx = (fMinX + fMaxX) / 2;
-                    const cy = (fMinY + fMaxY) / 2;
+                    const cx = bestCx || (fMinX + fMaxX) / 2;
+                    const cy = bestCy || (fMinY + fMaxY) / 2;
 
                     if (!tLabelsData[tKey]) tLabelsData[tKey] = { sumX: 0, sumY: 0, count: 0, name: territoryName };
                     tLabelsData[tKey].sumX += cx; tLabelsData[tKey].sumY += cy; tLabelsData[tKey].count += 1;
@@ -188,7 +295,7 @@ export default function ConectaMap({
                     const d = getPathD(feat.geometry, project);
                     return { nome: municipio, territory: territoryName, d, cx, cy, fBounds: { minX: fMinX, maxX: fMaxX, minY: fMinY, maxY: fMaxY } };
                 });
-                
+
                 const labels = Object.values(tLabelsData).map(t => ({ name: t.name, x: t.sumX / t.count, y: t.sumY / t.count }));
 
                 setMapFeatures(features);
@@ -224,7 +331,7 @@ export default function ConectaMap({
     // === CÂMERA INTELIGENTE ===
     const baseTransform = useMemo(() => {
         if (!selectedTerritory || Object.keys(calcBoundsGlobal).length === 0) return { tx: 0, ty: 0, scale: 1 };
-        
+
         const tKey = getTerritoryKey(selectedTerritory.nome);
         let bounds = calcBoundsGlobal[tKey];
 
@@ -234,14 +341,14 @@ export default function ConectaMap({
 
         if (!bounds || bounds.minX === Infinity) return { tx: 0, ty: 0, scale: 1 };
 
-        const w = bounds.maxX - bounds.minX; 
+        const w = bounds.maxX - bounds.minX;
         const h = bounds.maxY - bounds.minY;
-        const cx = bounds.minX + w / 2; 
+        const cx = bounds.minX + w / 2;
         const cy = bounds.minY + h / 2;
-        
-        const availableWidth = SVG_W - 280; 
+
+        const availableWidth = SVG_W - 280;
         const scale = Math.min(availableWidth / w, SVG_H / h) * 0.88;
-        const clampedScale = Math.min(scale, 8); 
+        const clampedScale = Math.min(scale, 8);
 
         const tx = (availableWidth / 2) - cx * clampedScale;
         const ty = (SVG_H / 2) - cy * clampedScale;
@@ -267,7 +374,7 @@ export default function ConectaMap({
         const nodes = territoryLabels.map(label => {
             const lines = wrapText(label.name);
             const longestLine = lines.reduce((a, b) => (a.length > b.length ? a : b), '');
-            
+
             // Estimar dimensões do rótulo
             const width = longestLine.length * fontSize * 0.55 + LABEL_COLLISION_PADDING;
             const height = lines.length * lineHeight + LABEL_COLLISION_PADDING;
@@ -297,6 +404,18 @@ export default function ConectaMap({
         for (let i = 0; i < SIMULATION_ITERATIONS; ++i) {
             simulation.tick();
         }
+
+        // Limita o deslocamento máximo para impedir que o rótulo vá para longe de sua região
+        const maxDist = 20 / baseTransform.scale;
+        nodes.forEach(node => {
+            const dx = node.x - node.idealX;
+            const dy = node.y - node.idealY;
+            const dist = Math.hypot(dx, dy);
+            if (dist > maxDist) {
+                node.x = node.idealX + (dx / dist) * maxDist;
+                node.y = node.idealY + (dy / dist) * maxDist;
+            }
+        });
 
         // 3. Retornar os nós com as posições finais calculadas
         return nodes;
@@ -345,6 +464,17 @@ export default function ConectaMap({
             simulation.tick();
         }
 
+        const maxMunDist = 15 / baseTransform.scale;
+        nodes.forEach(node => {
+            const dx = node.x - node.idealX;
+            const dy = node.y - node.idealY;
+            const dist = Math.hypot(dx, dy);
+            if (dist > maxMunDist) {
+                node.x = node.idealX + (dx / dist) * maxMunDist;
+                node.y = node.idealY + (dy / dist) * maxMunDist;
+            }
+        });
+
         return nodes;
     }, [selectedTerritory, mapFeatures, baseTransform.scale, filtroSemiarido, semiaridoMunicipios]);
 
@@ -372,9 +502,17 @@ export default function ConectaMap({
         return () => svg.removeEventListener('wheel', handleNativeWheel);
     }, [loading]);
 
-    const handleMouseDown = (e) => { setIsDragging(true); dragTotal.current = 0; lastMousePos.current = { x: e.clientX, y: e.clientY }; };
+    const handleMouseDown = (e) => { 
+        if (e.button === 0) {
+            window.getSelection()?.removeAllRanges();
+        }
+        setIsDragging(true); 
+        dragTotal.current = 0; 
+        lastMousePos.current = { x: e.clientX, y: e.clientY }; 
+    };
     const handleMouseMoveSVG = (e) => {
         if (!isDragging) return;
+        window.getSelection()?.removeAllRanges();
         const dx = e.clientX - lastMousePos.current.x; const dy = e.clientY - lastMousePos.current.y;
         dragTotal.current += Math.abs(dx) + Math.abs(dy);
         lastMousePos.current = { x: e.clientX, y: e.clientY };
@@ -397,7 +535,7 @@ export default function ConectaMap({
     // LÓGICA DE HOVER
     const onMapHover = useCallback((e, feat) => {
         if (feat.territory === 'Sem Território' || isDragging) return;
-        
+
         if (selectedTerritory) {
             const isSameTerritory = getTerritoryKey(feat.territory) === getTerritoryKey(selectedTerritory.nome);
             if (isSameTerritory) {
@@ -416,12 +554,12 @@ export default function ConectaMap({
 
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
-        
+
         const tooltipWidth = 260; const tooltipHeight = 180; const offset = 15;
         let x = e.clientX - rect.left + offset; let y = e.clientY - rect.top + offset;
         if (x + tooltipWidth > rect.width) x = e.clientX - rect.left - tooltipWidth - offset;
         if (y + tooltipHeight > rect.height) y = e.clientY - rect.top - tooltipHeight - offset;
-        
+
         setTooltip({ visible: true, x, y });
     }, [isDragging, selectedTerritory]);
 
@@ -453,7 +591,7 @@ export default function ConectaMap({
         const ifdm = devData?.ifdm ? Number(devData.ifdm).toFixed(3) : '-';
 
         const entidades = selectedTerritory.entidadesDetalhadas?.filter(e => normalizeName(e.municipio) === munKey) || [];
-        
+
         const cadeias = selectedTerritory.cadeiasProdutivasDetalhado?.filter(c => {
             const sede = normalizeName(c.sede);
             let satelite = normalizeName(c.municipioSatelite || c.municipiosSatelites || c.satelite || '');
@@ -479,7 +617,7 @@ export default function ConectaMap({
         if (!selectedTerritory) return [];
         const tBase = territoriosMunicipios.territorios_de_identidade.find(t => getTerritoryKey(t.nome) === getTerritoryKey(selectedTerritory.nome));
         if (!tBase) return [];
-        
+
         let muns = tBase.municipios;
         if (filtroSemiarido) {
             muns = muns.filter(m => semiaridoMunicipios.includes(normalizeName(m)));
@@ -487,24 +625,27 @@ export default function ConectaMap({
         return muns.sort();
     }, [selectedTerritory, filtroSemiarido, semiaridoMunicipios]);
 
+    const municipalitiesToShow = isMunListExpanded ? selectedTerritoryMunicipalities : selectedTerritoryMunicipalities.slice(0, 4);
+
     return (
-        <div ref={containerRef} className="relative isolate w-full h-full min-h-[500px] flex items-center justify-center bg-transparent rounded-xl overflow-hidden">
-            
+        <div ref={containerRef} className="relative isolate w-full h-full min-h-[500px] flex items-center justify-center bg-transparent rounded-xl overflow-hidden select-none">
+
             {loading ? (
                 <div className="flex flex-col items-center text-gov-blueDark-500">
                     <svg className="animate-spin h-8 w-8 mb-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     <span className="text-xs font-semibold tracking-wider uppercase">Carregando Malha...</span>
                 </div>
             ) : (
-                <svg 
+                <svg
                     ref={svgRef}
-                    viewBox={`0 0 ${SVG_W} ${SVG_H}`} 
-                    className={`w-full h-full overflow-visible ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                    viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+                    className={`w-full h-full overflow-visible select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                    style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                     onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveSVG}
-                    onMouseUp={handleMouseUp} 
-                    onMouseLeave={() => { 
-                        handleMouseUp(); 
-                        setTooltip({ visible: false, x: 0, y: 0 }); 
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={() => {
+                        handleMouseUp();
+                        setTooltip({ visible: false, x: 0, y: 0 });
                         setHoveredTerritory(null);
                         setHoveredMunicipality(null);
                     }}
@@ -512,46 +653,53 @@ export default function ConectaMap({
 
                     <g style={{ transform: `translate(${userPan.x}px, ${userPan.y}px) scale(${userScale})`, transformOrigin: 'center', transition: isDragging ? 'none' : 'transform 0.1s ease-out' }}>
                         <g style={{ transform: `translate(${baseTransform.tx}px, ${baseTransform.ty}px) scale(${baseTransform.scale})`, transformOrigin: '0 0', transition: 'transform 0.65s cubic-bezier(0.16, 1, 0.3, 1)' }}>
-                            
+
                             {/* 1. MUNICÍPIOS (POLÍGONOS) */}
                             {mapFeatures.map((feat, index) => {
                                 const normalizedFeatName = getTerritoryKey(feat.territory);
-                                
+
                                 // ACESSO AOS CÁLCULOS CRUZADOS DE FILTROS VINDOS DO APP.JSX
                                 const dStats = territoriesDynamicStats[normalizedFeatName];
                                 const matchesFilters = dStats ? dStats.matchesFilters : true;
 
                                 const isSelectedMap = selectedTerritory && getTerritoryKey(selectedTerritory.nome) === normalizedFeatName;
                                 const isMunSemi = semiaridoMunicipios.includes(normalizeName(feat.nome));
-                                
+
                                 // A lógica de bloqueio agora considera se um território está selecionado.
                                 // Se um território estiver selecionado, não bloqueamos os outros visualmente, apenas a interatividade.
                                 const blockClickAndColor = (filtroSemiarido && !isMunSemi) || (!isSelectedMap && !matchesFilters);
-                                
+
                                 const isHovered = !blockClickAndColor && (hoveredTerritory === feat.territory || hoveredMunicipality === feat.nome);
 
-                                let opacity = 0.90; 
+                                let opacity = 0.90;
                                 let fillColor = territoryColorMap[normalizedFeatName] || '#E2E8F0';
 
                                 if (blockClickAndColor && !selectedTerritory) {
-                                    // Se o bloqueio for pelo filtro do semiárido, apenas diminui a opacidade, mantendo a cor.
-                                    if (filtroSemiarido && !isMunSemi) {
-                                        opacity = 0.15;
-                                    } else { // Se for por outros filtros (CTI, IFDM), deixa cinza.
-                                        fillColor = darkMode ? '#1e293b' : '#e2e8f0'; 
-                                        opacity = 0.1;
-                                    }
+                                    fillColor = darkMode ? '#374151' : '#E5E7EB';
+                                    opacity = 0.50;
                                 } else if (selectedTerritory) {
                                     if (isSelectedMap) {
                                         opacity = 1;
-                                        // A cor laranja do semiárido só se aplica se o filtro estiver ativo.
-                                        if (filtroSemiarido && isMunSemi) fillColor = '#F97316'; 
+                                        if (filtroSemiarido && isMunSemi) fillColor = '#FFC107';
                                     } else {
-                                        fillColor = darkMode ? '#334155' : '#cbd5e1';
-                                        opacity = 0.4; // Aumenta a visibilidade das áreas não selecionadas
+                                        fillColor = darkMode ? '#374151' : '#e5e7eb';
+                                        opacity = 0.25;
                                     }
                                 } else {
                                     if (isHovered) opacity = 1;
+                                }
+
+                                // No dark mode, clarear as cores dos territórios para ficarem visíveis
+                                if (darkMode && fillColor.startsWith('#') && fillColor !== '#374151') {
+                                    const hex = fillColor.replace('#', '');
+                                    const r = parseInt(hex.substring(0, 2), 16);
+                                    const g = parseInt(hex.substring(2, 4), 16);
+                                    const b = parseInt(hex.substring(4, 6), 16);
+                                    const lift = 0.35;
+                                    const nr = Math.min(255, Math.round(r + (255 - r) * lift));
+                                    const ng = Math.min(255, Math.round(g + (255 - g) * lift));
+                                    const nb = Math.min(255, Math.round(b + (255 - b) * lift));
+                                    fillColor = `#${nr.toString(16).padStart(2,'0')}${ng.toString(16).padStart(2,'0')}${nb.toString(16).padStart(2,'0')}`;
                                 }
 
                                 return (
@@ -560,7 +708,7 @@ export default function ConectaMap({
                                         feat={feat}
                                         d={feat.d}
                                         fill={fillColor}
-                                        stroke={isSelectedMap || isHovered ? '#ffffff' : (darkMode ? '#1e293b' : '#f8fafc')}
+                                        stroke={isSelectedMap || isHovered ? (darkMode ? '#000' : '#fff') : (darkMode ? '#1e293b' : '#F9FAFB')}
                                         strokeWidth={isSelectedMap ? 2 : isHovered ? 2 : 0.8}
                                         opacity={opacity}
                                         blockClickAndColor={blockClickAndColor}
@@ -573,7 +721,7 @@ export default function ConectaMap({
 
                             {/* 2. TEXTOS DOS TERRITÓRIOS (Sem seleção) */}
                             {!selectedTerritory && (
-                                <g 
+                                <g
                                     className="territory-labels-container"
                                     style={{ opacity: userScale > 1.05 ? 1 : 0, transition: 'opacity 0.4s ease', pointerEvents: 'none' }}
                                 >
@@ -583,33 +731,34 @@ export default function ConectaMap({
                                         if (dStats && !dStats.matchesFilters) return null;
 
                                         const { x, y, idealX, idealY, lines } = node;
-                                        const fontSize = 16 / effectiveScale; 
+                                        const fontSize = 16 / effectiveScale;
                                         const strokeW = 4 / effectiveScale;
                                         const lineHeight = fontSize * 1.1;
                                         const startY = y - ((lines.length - 1) * lineHeight) / 2;
 
-                                        // Verifica se precisa de uma leader line
+                                        // Verifica se precisa de uma leader line (apenas se o rótulo for afastado significativamente)
                                         const dx = x - idealX;
                                         const dy = y - idealY;
-                                        const distance = Math.sqrt(dx * dx + dy * dy);
-                                        const needsLeaderLine = distance > 10 / baseTransform.scale;
+                                        const distance = Math.hypot(dx, dy);
+                                        const needsLeaderLine = distance > 14 / baseTransform.scale;
 
                                         return (
                                             <g key={`t-lbl-${i}`}>
                                                 {needsLeaderLine && (
-                                                    <>
-                                                        <line 
-                                                            x1={idealX} y1={idealY} x2={x} y2={y} 
-                                                            stroke={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"} 
-                                                            strokeWidth={0.8 / effectiveScale} 
+                                                    <g opacity={0.9}>
+                                                        <line
+                                                            x1={idealX} y1={idealY} x2={x} y2={y}
+                                                            stroke={darkMode ? "rgba(255, 255, 255, 0.75)" : "rgba(15, 76, 129, 0.75)"}
+                                                            strokeWidth={1.8 / effectiveScale}
+                                                            strokeDasharray={`${3 / effectiveScale},${2 / effectiveScale}`}
                                                         />
-                                                        <circle cx={idealX} cy={idealY} r={1.5 / effectiveScale} fill={darkMode ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)"} />
-                                                    </>
+                                                        <circle cx={idealX} cy={idealY} r={2.5 / effectiveScale} fill={darkMode ? "rgba(255, 255, 255, 0.9)" : "rgba(15, 76, 129, 0.9)"} />
+                                                    </g>
                                                 )}
-                                                <text 
-                                                    x={x} y={y} textAnchor="middle" alignmentBaseline="middle" 
-                                                    style={{ 
-                                                        paintOrder: 'stroke', stroke: darkMode ? 'rgba(10, 15, 28, 0.7)' : 'rgba(255, 255, 255, 0.7)', strokeWidth: `${strokeW * 0.8}px`, strokeLinejoin: 'round',
+                                                <text
+                                                    x={x} y={y} textAnchor="middle" alignmentBaseline="middle"
+                                                    style={{
+                                                        paintOrder: 'stroke', stroke: darkMode ? 'rgba(17, 24, 39, 0.7)' : 'rgba(255, 255, 255, 0.7)', strokeWidth: `${strokeW * 0.8}px`, strokeLinejoin: 'round',
                                                         fill: darkMode ? 'rgba(255, 255, 255, 0.95)' : 'rgba(0,0,0,0.85)', fontSize: `${fontSize}px`, fontWeight: '600',
                                                     }}
                                                 >
@@ -638,8 +787,8 @@ export default function ConectaMap({
                                         // Determina a cor do texto: mais sutil se não corresponder aos filtros
                                         const dStats = territoriesDynamicStats[getTerritoryKey(lbl.name)];
                                         const matchesFilters = !dStats || dStats.matchesFilters;
-                                        const fillColor = darkMode 
-                                            ? (matchesFilters ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)') 
+                                        const fillColor = darkMode
+                                            ? (matchesFilters ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)')
                                             : (matchesFilters ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)');
 
                                         return (
@@ -658,31 +807,36 @@ export default function ConectaMap({
                                 <g style={{ opacity: 1, transition: 'opacity 0.4s ease', pointerEvents: 'none' }}>
                                     {laidOutMunicipalityLabels.map((node, i) => {
                                         const { x, y, idealX, idealY, lines } = node;
-                                        const fontSize = 14 / effectiveScale; 
+                                        const fontSize = 14 / effectiveScale;
                                         const strokeW = 3.5 / effectiveScale;
                                         const lineHeight = fontSize * 1.1;
                                         const startY = y - ((lines.length - 1) * lineHeight) / 2;
 
                                         const dx = x - idealX;
                                         const dy = y - idealY;
-                                        const distance = Math.sqrt(dx * dx + dy * dy);
-                                        const needsLeaderLine = distance > 5 / baseTransform.scale;
+                                        const distance = Math.hypot(dx, dy);
+                                        const needsLeaderLine = distance > 10 / baseTransform.scale;
 
                                         return (
                                             <g key={`m-lbl-${i}`}>
                                                 {needsLeaderLine && (
-                                                    <>
-                                                        <line x1={idealX} y1={idealY} x2={x} y2={y} stroke={darkMode ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)"} strokeWidth={0.7 / effectiveScale} />
-                                                        <circle cx={idealX} cy={idealY} r={1.2 / effectiveScale} fill={darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)"} />
-                                                    </>
+                                                    <g opacity={0.9}>
+                                                        <line
+                                                            x1={idealX} y1={idealY} x2={x} y2={y}
+                                                            stroke={darkMode ? "rgba(255, 255, 255, 0.8)" : "rgba(15, 76, 129, 0.8)"}
+                                                            strokeWidth={1.5 / effectiveScale}
+                                                            strokeDasharray={`${2.5 / effectiveScale},${1.5 / effectiveScale}`}
+                                                        />
+                                                        <circle cx={idealX} cy={idealY} r={2 / effectiveScale} fill={darkMode ? "rgba(255, 255, 255, 0.95)" : "rgba(15, 76, 129, 0.95)"} />
+                                                    </g>
                                                 )}
-                                                <text 
+                                                <text
                                                     x={x} y={y} textAnchor="middle" alignmentBaseline="middle"
-                                                    style={{ 
-                                                        paintOrder: 'stroke', 
-                                                        stroke: darkMode ? 'rgba(10, 15, 28, 0.8)' : 'rgba(255, 255, 255, 0.8)', 
+                                                    style={{
+                                                        paintOrder: 'stroke',
+                                                        stroke: darkMode ? 'rgba(17, 24, 39, 0.8)' : 'rgba(255, 255, 255, 0.8)',
                                                         strokeWidth: `${strokeW * 0.7}px`, strokeLinejoin: 'round',
-                                                        fill: darkMode ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0,0,0,0.8)', 
+                                                        fill: darkMode ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0,0,0,0.8)',
                                                         fontSize: `${fontSize}px`, fontWeight: '500',
                                                     }}
                                                 >
@@ -702,84 +856,94 @@ export default function ConectaMap({
 
             {/* CAIXA LATERAL DE MUNICÍPIOS COM TRANSPARÊNCIA */}
             {selectedTerritory && selectedTerritoryMunicipalities.length > 0 && (
-                <div className={`absolute top-5 right-5 z-30 w-56 md:w-64 max-h-[calc(100%-80px)] overflow-y-auto hide-scroll p-4 rounded-[1.5rem] border backdrop-blur-xl shadow-2xl transition-all animate-soft-fade ${darkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-white/60'}`}>
-                    <h4 className={`text-[10px] font-black uppercase tracking-widest mb-3 border-b pb-2 leading-tight ${darkMode ? 'text-slate-300 border-slate-700/50' : 'text-slate-500 border-slate-200/60'}`}>
+                <div className={`absolute top-5 right-5 z-30 w-56 md:w-64 max-h-[calc(100%-80px)] overflow-y-auto hide-scroll p-4 rounded-[1.5rem] border backdrop-blur-xl shadow-2xl transition-all animate-soft-fade ${darkMode ? 'bg-gray-900/80 border-gray-700' : 'bg-white/80 border-white/60'}`}>
+                    <h4 className={`text-[10px] font-black uppercase tracking-widest mb-3 border-b pb-2 leading-tight ${darkMode ? 'text-gray-300 border-gray-700/50' : 'text-gray-500 border-gray-200/60'}`}>
                         {selectedTerritory.nome}
                     </h4>
                     <ul className="flex flex-col gap-1.5">
-                        {selectedTerritoryMunicipalities.map((m, idx) => {
+                        {municipalitiesToShow.map((m, idx) => {
                             const isSemi = semiaridoMunicipios.includes(normalizeName(m));
                             return (
-                                <li key={idx} className={`text-[11px] font-medium flex items-center gap-2 leading-tight ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    <span className={`shrink-0 w-2 h-2 rounded-full border ${isSemi ? 'bg-orange-500 border-orange-600' : (darkMode ? 'bg-slate-300 border-slate-400' : 'bg-slate-200 border-slate-300')}`}></span>
+                                <li key={idx} className={`text-[11px] font-medium flex items-center gap-2 leading-tight ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                    <span className={`shrink-0 w-2 h-2 rounded-full border ${isSemi ? 'bg-gov-yellow border-yellow-600' : (darkMode ? 'bg-gray-300 border-gray-400' : 'bg-gray-200 border-gray-300')}`}></span>
                                     {m}
                                 </li>
-                            )
+                            );
                         })}
                     </ul>
+                    {selectedTerritoryMunicipalities.length > 4 && (
+                        <button
+                            onClick={() => setIsMunListExpanded(!isMunListExpanded)}
+                            className={`w-full mt-3 text-center text-[10px] font-bold uppercase tracking-wider py-2 rounded-lg transition-colors ${darkMode ? 'bg-gray-800/70 hover:bg-gray-700/90 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+                        >
+                            {isMunListExpanded ? 'Ver menos' : `Ver mais ${selectedTerritoryMunicipalities.length - 4}...`}
+                        </button>
+                    )}
                 </div>
             )}
 
             {/* LEGENDA DO MAPA */}
-            <div className={`absolute bottom-6 left-6 z-20 px-4 py-3.5 rounded-2xl border shadow-xl backdrop-blur-xl flex flex-col gap-2.5 pointer-events-none transition-colors duration-500 ${darkMode ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white/70 border-white/60'}`}>
-                <div className="flex items-center gap-2.5">
-                    <span className="w-2 h-2 rounded-full bg-orange-500 shadow-sm"></span>
-                    <span className={`text-[10px] font-medium tracking-wide ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                        Pertencente ao Semiárido
-                    </span>
+            {selectedTerritory && (
+                <div className={`absolute bottom-6 left-6 z-20 px-4 py-3.5 rounded-2xl border shadow-xl backdrop-blur-xl flex flex-col gap-2.5 pointer-events-none transition-all duration-500 animate-soft-fade ${darkMode ? 'bg-gray-900/60 border-gray-700/50' : 'bg-white/70 border-white/60'}`}>
+                    <div className="flex items-center gap-2.5">
+                        <span className="w-2 h-2 rounded-full bg-gov-yellow shadow-sm"></span>
+                        <span className={`text-[10px] font-medium tracking-wide ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Pertencente ao Semiárido
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2.5 opacity-80">
+                        <span className={`w-2 h-2 rounded-full ${darkMode ? 'bg-gray-700' : 'bg-gray-300'}`}></span>
+                        <span className={`text-[10px] font-medium tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Não pertencente ao Semiárido
+                        </span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2.5 opacity-80">
-                    <span className={`w-2 h-2 rounded-full ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></span>
-                    <span className={`text-[10px] font-medium tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Oculto ou Sem Dados
-                    </span>
-                </div>
-            </div>
+            )}
 
             {/* CONTROLES MANUAIS FLUTUANTES */}
             <div className="absolute bottom-5 right-5 flex flex-col gap-2 z-20">
-                <button onClick={() => setUserScale(p => Math.min(p * 1.3, 10))} className={`w-8 h-8 rounded-lg shadow-md font-black text-lg flex items-center justify-center transition-colors border ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'}`}>+</button>
-                <button onClick={() => setUserScale(p => Math.max(p / 1.3, 0.5))} className={`w-8 h-8 rounded-lg shadow-md font-black text-lg flex items-center justify-center transition-colors border ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'}`}>-</button>
-                <button onClick={() => { setUserScale(1); setUserPan({x:0, y:0}); onSelectTerritory(null); }} className={`w-8 h-8 rounded-lg shadow-md font-bold text-[10px] flex items-center justify-center transition-colors border ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'}`}>↺</button>
+                <button onClick={() => setUserScale(p => Math.min(p * 1.3, 10))} className={`w-8 h-8 rounded-lg shadow-md font-black text-lg flex items-center justify-center transition-colors border ${darkMode ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-100'}`}>+</button>
+                <button onClick={() => setUserScale(p => Math.max(p / 1.3, 0.5))} className={`w-8 h-8 rounded-lg shadow-md font-black text-lg flex items-center justify-center transition-colors border ${darkMode ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-100'}`}>-</button>
+                <button onClick={() => { setUserScale(1); setUserPan({ x: 0, y: 0 }); onSelectTerritory(null); }} className={`w-8 h-8 rounded-lg shadow-md font-bold text-[10px] flex items-center justify-center transition-colors border ${darkMode ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-100'}`}>↺</button>
             </div>
 
             {/* TOOLTIP DO MOUSE DINÂMICO (Território OU Município) */}
             {tooltip.visible && !isDragging && (hoveredTerritory || hoveredMunicipality) && (
-                <div 
-                    className={`absolute z-50 overflow-hidden rounded-2xl border backdrop-blur-md shadow-2xl pointer-events-none transition-opacity duration-200 ${darkMode ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-white/60'}`} 
+                <div
+                    className={`absolute z-50 overflow-hidden rounded-2xl border backdrop-blur-md shadow-2xl pointer-events-none transition-opacity duration-200 ${darkMode ? 'bg-gray-900/90 border-gray-700' : 'bg-white/90 border-white/60'}`}
                     style={{ top: tooltip.y, left: tooltip.x, width: 280 }}
                 >
-                    
+
                     {/* CASO 1: HOVER NUM TERRITÓRIO GERAL */}
                     {hoveredTerritory && hoveredData && dynamicStats && (
                         <>
                             <div className="h-1.5 w-full" style={{ backgroundColor: territoryColorMap[getTerritoryKey(hoveredData.nome)] || '#0f766e' }}></div>
                             <div className="p-4">
                                 <div className="flex justify-between items-start mb-3">
-                                    <h2 className={`font-bold text-[14px] uppercase tracking-tight leading-tight pr-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{hoveredData.nome}</h2>
+                                    <h2 className={`font-bold text-[14px] uppercase tracking-tight leading-tight pr-2 ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>{hoveredData.nome}</h2>
                                     {dynamicStats.pctSemiarido > 0 && (
-                                        <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 mt-0.5 ${dynamicStats.pctSemiarido >= 100 ? 'text-gov-red-500 bg-gov-red-50 border border-gov-red-100' : 'text-orange-600 bg-orange-50 border border-orange-100'}`}>
+                                        <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 mt-0.5 ${dynamicStats.pctSemiarido >= 100 ? 'text-gov-red bg-gov-red/10 border border-gov-red/20' : 'text-yellow-600 bg-yellow-50 border border-yellow-100'}`}>
                                             {dynamicStats.pctSemiarido >= 100 ? 'Semiárido' : `Semiárido: ${dynamicStats.pctSemiarido.toFixed(0)}%`}
                                         </span>
                                     )}
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 mb-2">
-                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                        <span className="block text-[8px] font-bold uppercase text-slate-400">Entidades CT&I</span>
-                                        <span className="block text-base font-black text-gov-blueDark-500">{dynamicStats.capacidadeCti}</span>
+                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                        <span className="block text-[8px] font-bold uppercase text-gray-400">Entidades CT&I</span>
+                                        <span className="block text-base font-black text-gov-blue">{dynamicStats.capacidadeCti}</span>
                                     </div>
-                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                        <span className="block text-[8px] font-bold uppercase text-slate-400">IFDM (Média)</span>
-                                        <span className="block text-base font-black text-gov-red-500">{dynamicStats.ifdm}</span>
+                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                        <span className="block text-[8px] font-bold uppercase text-gray-400">IFDM (Média)</span>
+                                        <span className="block text-base font-black text-gov-red">{dynamicStats.ifdm}</span>
                                     </div>
                                 </div>
-                                <div className={`rounded-lg p-2 border mb-2 ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                    <span className="block text-[8px] font-bold uppercase text-slate-400">Iniciativas Estaduais</span>
-                                    <span className="block text-[11px] font-bold text-gov-cyan-700">{dynamicStats.conectaBahia}</span>
+                                <div className={`rounded-lg p-2 border mb-2 ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                    <span className="block text-[8px] font-bold uppercase text-gray-400">Iniciativas Estaduais</span>
+                                    <span className="block text-[11px] font-bold text-gov-cyan">{dynamicStats.conectaBahia}</span>
                                 </div>
-                                <div className={`rounded-lg p-2 border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                    <span className="block text-[8px] font-bold uppercase text-slate-400">Cadeias & IGs</span>
-                                    <span className={`block text-xs font-semibold truncate ${darkMode ? 'text-slate-300' : 'text-slate-700'}`} title={dynamicStats.cadeiasIgs}>{dynamicStats.cadeiasIgs}</span>
+                                <div className={`rounded-lg p-2 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                    <span className="block text-[8px] font-bold uppercase text-gray-400">Cadeias & IGs</span>
+                                    <span className={`block text-xs font-semibold truncate ${darkMode ? 'text-gray-300' : 'text-gray-700'}`} title={dynamicStats.cadeiasIgs}>{dynamicStats.cadeiasIgs}</span>
                                 </div>
                             </div>
                         </>
@@ -791,28 +955,28 @@ export default function ConectaMap({
                             <div className="h-1.5 w-full" style={{ backgroundColor: '#0ea5e9' }}></div>
                             <div className="p-4">
                                 <div className="flex justify-between items-start mb-3">
-                                    <h2 className={`font-bold text-[14px] uppercase tracking-tight leading-tight pr-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                                    <h2 className={`font-bold text-[14px] uppercase tracking-tight leading-tight pr-2 ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
                                         {hoveredMunData.nome}
                                     </h2>
                                     {hoveredMunData.isSemi && (
-                                        <span className="text-[8px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 mt-0.5 text-orange-600 bg-orange-50 border border-orange-100">
+                                        <span className="text-[8px] font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 mt-0.5 text-yellow-700 bg-gov-yellow/20 border border-gov-yellow/30">
                                             Semiárido
                                         </span>
                                     )}
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 mb-2">
-                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                        <span className="block text-[8px] font-bold uppercase text-slate-400">Entidades CT&I</span>
-                                        <span className="block text-base font-black text-gov-blueDark-500">{hoveredMunData.entidadesCount}</span>
+                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                        <span className="block text-[8px] font-bold uppercase text-gray-400">Entidades CT&I</span>
+                                        <span className="block text-base font-black text-gov-blue">{hoveredMunData.entidadesCount}</span>
                                     </div>
-                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                        <span className="block text-[8px] font-bold uppercase text-slate-400">Cadeias & IGs</span>
-                                        <span className="block text-base font-black text-emerald-500">{hoveredMunData.cadeiasCount}</span>
+                                    <div className={`rounded-lg p-2 border ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                        <span className="block text-[8px] font-bold uppercase text-gray-400">Cadeias & IGs</span>
+                                        <span className="block text-base font-black text-gov-green">{hoveredMunData.cadeiasCount}</span>
                                     </div>
                                 </div>
-                                <div className={`rounded-lg p-2 border mb-2 ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-100/50 border-slate-200/50'}`}>
-                                    <span className="block text-[8px] font-bold uppercase text-slate-400">D. Territ. (IFDM)</span>
-                                    <span className="block text-[11px] font-bold text-gov-red-500">{hoveredMunData.ifdm}</span>
+                                <div className={`rounded-lg p-2 border mb-2 ${darkMode ? 'bg-gray-800/80 border-gray-700' : 'bg-gray-100/50 border-gray-200/50'}`}>
+                                    <span className="block text-[8px] font-bold uppercase text-gray-400">D. Territ. (IFDM)</span>
+                                    <span className="block text-[11px] font-bold text-gov-red">{hoveredMunData.ifdm}</span>
                                 </div>
                             </div>
                         </>
@@ -821,4 +985,6 @@ export default function ConectaMap({
             )}
         </div>
     );
-}
+});
+
+export default PtiMap;

@@ -1,44 +1,99 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
+import { Download, RefreshCw } from 'lucide-react';
+import { useData } from '../context/DataContext';
+
+/**
+ * Calcula dinamicamente as larguras ideais para cada coluna da planilha
+ * garantindo que nenhum texto fique cortado ou sobreposto.
+ */
+function calculateColumnWidths(data) {
+  if (!data || data.length === 0) return [];
+  const keys = Object.keys(data[0]);
+  return keys.map(key => {
+    let maxLen = key.length;
+    data.forEach(row => {
+      const val = row[key];
+      if (val !== null && val !== undefined) {
+        const strVal = String(val);
+        if (strVal.length > maxLen) {
+          maxLen = strVal.length;
+        }
+      }
+    });
+    // Adiciona margem de respiro e define limites razoáveis
+    return { wch: Math.min(Math.max(maxLen + 4, 14), 65) };
+  });
+}
+
+/**
+ * Cria a aba (worksheet) com colunas autoajustadas e Filtro Automático ativado
+ */
+function createOrganizedSheet(data) {
+  const ws = XLSX.utils.json_to_sheet(data);
+  if (data && data.length > 0) {
+    ws['!cols'] = calculateColumnWidths(data);
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range(range) };
+  }
+  return ws;
+}
+
+/**
+ * Função utilitária para ordenação alfabética
+ */
+function sortAlpha(a, b, key) {
+  return String(a[key] || '').localeCompare(String(b[key] || ''), 'pt-BR');
+}
 
 export default function ExcelExportButton({
-  territoriosData = [],
+  territoriosData: propTerritoriosData,
   className = '',
-  variant = 'solid' 
+  variant = 'solid',
+  darkMode: propDarkMode
 }) {
   const [isLoading, setIsLoading] = useState(false);
+  let contextData;
+  try { contextData = useData(); } catch (e) { contextData = null; }
+
+  const territoriosData = (propTerritoriosData && propTerritoriosData.length > 0) ? propTerritoriosData : (contextData?.territoriosData || []);
+  const darkMode = propDarkMode !== undefined ? propDarkMode : (contextData?.darkMode || false);
 
   const handleExportExcel = () => {
     setIsLoading(true);
 
     try {
-      // 1. INICIALIZAR AS MATRIZES DE DADOS (Tabelas)
+      // 1. ESTRUTURAR AS TABELAS DE DADOS
       const dataTerritorios = [];
       const dataCTI = [];
       const dataCadeias = [];
-      const dataMunicipios = [];
       const dataCursos = [];
+      const dataMunicipios = [];
 
       territoriosData.forEach(t => {
-        // ABA 1: RESUMO DO TERRITÓRIO (Atualizado com Assistência Pública em CT&I)
+        const ifdmVal = t.kpis?.ifdm !== "-" && t.kpis?.ifdm ? Number(t.kpis.ifdm) : (t.desenvolvimento?.ifdmTi ? Number(Number(t.desenvolvimento.ifdmTi).toFixed(3)) : "-");
+        const semiaridoQtd = t.qtdSemiarido !== undefined ? t.qtdSemiarido : 0;
+
+        // ABA 1: RESUMO DO TERRITÓRIO
         dataTerritorios.push({
-          "Território de Identidade": t.nome,
-          "Recorte Semiárido": t.isSemiarido ? "Sim" : "Não",
-          "IFDM Territorial (Média)": t.kpis?.ifdm !== "-" ? Number(t.kpis.ifdm) : "-",
-          "Total Entidades CT&I": Number(t.kpis?.capacidadeCti || 0),
-          "Total Cadeias/IGs": Number(t.kpis?.cadeiasIgs || 0),
-          "Assistência Pública em CT&I": t.kpis?.conectaBahia || "Não Mapeado",
-          "Total Cursos Superiores": t.cursosDetalhado ? t.cursosDetalhado.length : 0
+          "Território de Identidade": t.nome || t.regiao || "-",
+          "Recorte Semiárido": t.isSemiarido ? "Pertencente" : "Não pertencente",
+          "Qtd. Municípios no Semiárido": semiaridoQtd,
+          "IFDM Territorial (Média)": ifdmVal,
+          "Total Entidades CT&I": Number(t.kpis?.capacidadeCti || (t.entidadesDetalhadas ? t.entidadesDetalhadas.length : 0)),
+          "Total Cadeias / IGs": Number(t.kpis?.cadeiasIgs || (t.cadeiasProdutivasDetalhado ? t.cadeiasProdutivasDetalhado.length : 0)),
+          "Total Cursos Superiores": t.cursosDetalhado ? t.cursosDetalhado.length : 0,
+          "Programa PTI (Assistência Pública)": t.kpis?.conectaBahia || t.kpis?.pti || (t.assistenciaPublica?.existe ? "Presente" : "Não mapeado")
         });
 
-        // ABA 2: ENTIDADES DE CT&I
+        // ABA 2: INFRAESTRUTURA DE CT&I
         if (t.entidadesDetalhadas && t.entidadesDetalhadas.length > 0) {
           t.entidadesDetalhadas.forEach(ent => {
             dataCTI.push({
               "Território de Identidade": t.nome,
               "Município Sede": ent.municipio || "-",
               "Categoria / Segmento": ent.tipo || ent.categoria || "-",
-              "Nome da Instituição": ent.entidade || "-",
+              "Nome da Instituição": ent.entidade || "-"
             });
           });
         }
@@ -49,8 +104,8 @@ export default function ExcelExportButton({
             dataCadeias.push({
               "Território de Identidade": t.nome,
               "Segmento": cad.segmento || "-",
-              "Classificação": cad.tipo || "-",
-              "Entidade Vinculada": cad.entidade || "-",
+              "Classificação / Tipo": cad.tipo || "-",
+              "Entidade / Produto": cad.entidade || "-",
               "Sede / Satélite": cad.sede || cad.municipioSatelite || "-",
               "Municípios Pertencentes": cad.municipiosPertencentes || "-",
               "Fonte Oficial": cad.fonte || "-"
@@ -58,19 +113,7 @@ export default function ExcelExportButton({
           });
         }
 
-        // ABA 4: MUNICÍPIOS, IFDM E POPULAÇÃO
-        if (t.desenvolvimentoDetalhado && t.desenvolvimentoDetalhado.length > 0) {
-            t.desenvolvimentoDetalhado.forEach(mun => {
-                dataMunicipios.push({
-                    "Território de Identidade": t.nome,
-                    "Município": mun.municipio || "-",
-                    "IFDM Municipal": mun.ifdm ? Number(mun.ifdm) : "-",
-                    "População Estimada": mun.populacao ? Number(mun.populacao) : "-"
-                });
-            });
-        }
-
-        // ABA 5: CURSOS EM CT&I (ENSINO SUPERIOR)
+        // ABA 4: CURSOS DE ENSINO SUPERIOR EM CT&I
         if (t.cursosDetalhado && t.cursosDetalhado.length > 0) {
           t.cursosDetalhado.forEach(curso => {
             dataCursos.push({
@@ -87,6 +130,18 @@ export default function ExcelExportButton({
             });
           });
         }
+
+        // ABA 5: MUNICÍPIOS, IFDM E POPULAÇÃO
+        if (t.desenvolvimentoDetalhado && t.desenvolvimentoDetalhado.length > 0) {
+          t.desenvolvimentoDetalhado.forEach(mun => {
+            dataMunicipios.push({
+              "Território de Identidade": t.nome,
+              "Município": mun.municipio || "-",
+              "IFDM Municipal": mun.ifdm ? Number(Number(mun.ifdm).toFixed(3)) : "-",
+              "População Estimada": mun.populacao ? Number(mun.populacao) : "-"
+            });
+          });
+        }
       });
 
       if (dataTerritorios.length === 0) {
@@ -95,31 +150,31 @@ export default function ExcelExportButton({
         return;
       }
 
-      // 2. CRIAR AS FOLHAS (Worksheets)
-      const wsTerritorios = XLSX.utils.json_to_sheet(dataTerritorios);
-      const wsCTI = XLSX.utils.json_to_sheet(dataCTI);
-      const wsCadeias = XLSX.utils.json_to_sheet(dataCadeias);
-      const wsMunicipios = XLSX.utils.json_to_sheet(dataMunicipios);
-      const wsCursos = XLSX.utils.json_to_sheet(dataCursos);
+      // 2. ORDENAR OS DADOS PARA UMA APRESENTAÇÃO LÓGICA E ORGANIZADA
+      dataTerritorios.sort((a, b) => sortAlpha(a, b, "Território de Identidade"));
+      dataCTI.sort((a, b) => sortAlpha(a, b, "Território de Identidade") || sortAlpha(a, b, "Município Sede") || sortAlpha(a, b, "Categoria / Segmento"));
+      dataCadeias.sort((a, b) => sortAlpha(a, b, "Território de Identidade") || sortAlpha(a, b, "Segmento"));
+      dataCursos.sort((a, b) => sortAlpha(a, b, "Território de Identidade") || sortAlpha(a, b, "Município") || sortAlpha(a, b, "Área Geral"));
+      dataMunicipios.sort((a, b) => sortAlpha(a, b, "Território de Identidade") || sortAlpha(a, b, "Município"));
 
-      // 3. AJUSTAR LARGURAS DAS COLUNAS PARA FICAR PROFISSIONAL
-      // Coluna 6 (wch: 32) garante espaço para "Assistência Pública em CT&I"
-      wsTerritorios['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 32 }, { wch: 25 }];
-      wsCTI['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 25 }, { wch: 55 }];
-      wsCadeias['!cols'] = [{ wch: 30 }, { wch: 35 }, { wch: 20 }, { wch: 45 }, { wch: 25 }, { wch: 50 }, { wch: 30 }];
-      wsMunicipios['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 18 }, { wch: 22 }];
-      wsCursos['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 12 }];
+      // 3. CRIAR AS FOLHAS (Worksheets) FORMATADAS
+      const wsTerritorios = createOrganizedSheet(dataTerritorios);
+      const wsCTI = createOrganizedSheet(dataCTI);
+      const wsCadeias = createOrganizedSheet(dataCadeias);
+      const wsCursos = createOrganizedSheet(dataCursos);
+      const wsMunicipios = createOrganizedSheet(dataMunicipios);
 
       // 4. MONTAR O LIVRO EXCEL (Workbook)
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, wsTerritorios, "Resumo Territorial");
-      XLSX.utils.book_append_sheet(workbook, wsCTI, "Infraestrutura CT&I");
-      XLSX.utils.book_append_sheet(workbook, wsCadeias, "Cadeias Produtivas");
-      XLSX.utils.book_append_sheet(workbook, wsMunicipios, "Municípios e IFDM");
-      XLSX.utils.book_append_sheet(workbook, wsCursos, "Cursos Ensino Superior");
+      XLSX.utils.book_append_sheet(workbook, wsTerritorios, "1. Resumo Territorial");
+      XLSX.utils.book_append_sheet(workbook, wsCTI, "2. Infraestrutura CT&I");
+      XLSX.utils.book_append_sheet(workbook, wsCadeias, "3. Cadeias Produtivas e IGs");
+      XLSX.utils.book_append_sheet(workbook, wsCursos, "4. Cursos Ensino Superior");
+      XLSX.utils.book_append_sheet(workbook, wsMunicipios, "5. Municípios e IFDM");
 
-      // 5. EXPORTAR FICHEIRO
-      XLSX.writeFile(workbook, "Dados_Consolidados_CT&I_DPPDT.xlsx");
+      // 5. EXPORTAR FICHEIRO FICANDO COM NOME CLARO E DATA
+      const dataFormatada = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `Dados_Consolidados_CTI_Bahia_${dataFormatada}.xlsx`);
 
     } catch (err) {
       console.error('Erro ao gerar Excel:', err);
@@ -128,6 +183,24 @@ export default function ExcelExportButton({
       setIsLoading(false);
     }
   };
+
+  // Variante para Barra Lateral / Ícone (Botão de Seta de Download)
+  if (variant === 'nav' || variant === 'icon') {
+    return (
+      <button
+        onClick={handleExportExcel}
+        disabled={isLoading || !territoriosData || territoriosData.length === 0}
+        className={className || `p-2.5 rounded-lg transition-colors ${isLoading || !territoriosData || territoriosData.length === 0 ? 'opacity-50 cursor-not-allowed' : ''} ${darkMode ? 'text-gray-400 hover:bg-gray-800 hover:text-green-400' : 'text-gray-500 hover:bg-gray-100 hover:text-gov-green'}`}
+        title="Exportar Base de Dados Excel (.xlsx)"
+      >
+        {isLoading ? (
+          <RefreshCw size={18} strokeWidth={2.5} className="animate-spin text-gov-green" />
+        ) : (
+          <Download size={18} strokeWidth={2.5} />
+        )}
+      </button>
+    );
+  }
 
   const buttonStyles = variant === 'outline'
     ? "w-full sm:w-auto px-6 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm transition-all duration-300 flex items-center justify-center shadow-sm border border-slate-200 hover:border-slate-300 transform-gpu"
@@ -142,17 +215,12 @@ export default function ExcelExportButton({
       >
         {isLoading ? (
           <>
-            <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
+            <RefreshCw className="animate-spin h-4 w-4 mr-2" />
             <span>A Estruturar Base...</span>
           </>
         ) : (
           <>
-            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+            <Download className="h-4 w-4 mr-2" />
             <span>Exportar Planilha Excel</span>
           </>
         )}

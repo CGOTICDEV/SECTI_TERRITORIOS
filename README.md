@@ -1,6 +1,52 @@
-# ConectaMap – Pontos do Conecta Bahia
+# PtiMap – Pontos do PTI Bahia
 
-Aplicação React que carrega um mapa da Bahia e destaca, por meio de marcadores, todos os municípios participantes do programa **Conecta Bahia**. O objetivo não é mais selecionar municípios, mas visualizar rapidamente quais localidades do estado fazem parte do programa.
+Aplicação React que carrega um mapa da Bahia e destaca, por meio de marcadores, todos os municípios participantes do programa **PTI**. O objetivo não é mais selecionar municípios, mas visualizar rapidamente quais localidades do estado fazem parte do programa.
+
+---
+
+## 🔐 Variáveis de Ambiente & Netlify Onboarding
+
+Para rodar a aplicação localmente ou realizar o deploy no **Netlify**, as seguintes variáveis de ambiente devem ser configuradas:
+
+| Variável | Escopo | Descrição | Exemplo / Valor Padrão |
+|---|---|---|---|
+| `VITE_SHAREPOINT_URL` | Build / Server / Client | URL do link de download direto da planilha oficial de dados no SharePoint. | `https://prodeboffice365-my.sharepoint.com/:x:/g/personal/sdc_secti_ba_gov_br/...` |
+| `VITE_OPENROUTER_API_KEY` | Client (Opcional) | Chave da API OpenRouter utilizada pelos recursos de IA e assistente. | `sk-or-v1-...` |
+
+### 🛠️ Configuração Local (`.env`)
+
+1. Copie o arquivo de exemplo para o seu ambiente local:
+   ```bash
+   cp .env.example .env
+   ```
+2. Abra o arquivo `.env` e preencha a URL do SharePoint ou sua API Key se necessário.
+
+---
+
+### 🚀 Configuração no Netlify (Deploy & Functions)
+
+Ao realizar o onboarding do projeto no **Netlify**:
+
+1. Acesse o painel do site no Netlify: **Site configuration** $\rightarrow$ **Environment variables**.
+2. Adicione as seguintes chaves:
+   - **`VITE_SHAREPOINT_URL`**: `https://prodeboffice365-my.sharepoint.com/:x:/g/personal/sdc_secti_ba_gov_br/IQCUmr5J0kxUQLKb9lRqZkT_AVOgJRieO_TN9lJiRxUzXI8?download=1`
+   - **`VITE_OPENROUTER_API_KEY`**: *(opcional - conforme o seu ambiente)*
+3. **Netlify Blobs**: Certifique-se de que a funcionalidade **Netlify Blobs** está habilitada no projeto para que as Netlify Functions (`sharepoint.js` e `sharepoint-refresh.js`) possam manter o cache de dados em produção.
+
+---
+
+### 🧪 Testes Unitários (`vitest`)
+
+O projeto possui uma suíte de testes unitários automatizados cobrindo normalizações, expansões de nomes e filtros.
+
+Para executar os testes:
+```bash
+# Executa todos os testes unitários uma vez
+npm test
+
+# Executa os testes no modo interativo (watch mode)
+npm run test:watch
+```
 
 ---
 
@@ -10,13 +56,13 @@ Aplicação React que carrega um mapa da Bahia e destaca, por meio de marcadores
 mapfilter-BA/
 ├── src/
 │   ├── App.jsx                    ← Componente de alto nível que exibe o mapa
-│   ├── ConectaMap.jsx             ← Mapa interativo com pontos Conecta
+│   ├── PtiMap.jsx                 ← Mapa interativo com pontos PTI
 │   └── utils/
 │       ├── Municipios.js          ← Lista dos 417 municípios da Bahia (para colorização)
 │       └── territorioMunicipios.json  ← Agrupamento por territórios (usado para cores opcionais)
 └── public/
     ├── BA_(1)9396399957704198.json ← TopoJSON do mapa da Bahia (~3.9 MB)
-    └── conectaMunicipios.json     ← Lista dos 133 municípios atendidos pelo programa
+    └── ptiMunicipios.json         ← Lista dos 133 municípios atendidos pelo programa
 ```
 
 ---
@@ -35,13 +81,13 @@ npm install topojson-client lucide-react
 
 | Arquivo | Destino sugerido (Vite/CRA) |
 |---|---|
-| `src/ConectaMap.jsx` | `src/components/` (ou o local de sua preferência) |
+| `PtiMap.jsx` | `src/components/` (ou o local de sua preferência) |
 | `utils/Municipios.js` | `src/utils/` |
 | `utils/territorioMunicipios.json` | `src/utils/` |
 | `public/BA_(1)9396399957704198.json` | `public/` (raiz pública) |
-| `public/conectaMunicipios.json` | `public/` |
+| `public/ptiMunicipios.json` | `public/` |
 
-> Ajuste os imports no topo de `ConectaMap.jsx` caso altere os caminhos dos utilitários.
+> Ajuste os imports no topo de `PtiMap.jsx` caso altere os caminhos dos utilitários.
 
 ### 3. Ajustar vite.config.js (se necessário)
 
@@ -52,10 +98,10 @@ Para importar JSON com `assert { type: 'json' }` no Vite, certifique-se que `res
 ## Uso básico
 
 ```jsx
-import ConectaMap from './ConectaMap';
+import PtiMap from './PtiMap';
 
 export default function App() {
-  return <ConectaMap />;
+  return <PtiMap />;
 }
 ```
 
@@ -64,16 +110,16 @@ export default function App() {
 
 ---
 
-(O componente `ConectaMap` não recebe props; ele carrega automaticamente os dados e renderiza o mapa.)
+(O componente `PtiMap` não recebe props; ele carrega automaticamente os dados e renderiza o mapa.)
 
 ---
 
 ## Funcionalidades
 
 - Mapa SVG vetorial interativo da Bahia com zoom (0.5x–4x) e pan por arrasto
-- Municípios participantes do Conecta são destacados com a cor do seu território; os demais aparecem esmaecidos em cinza
-- Círculos vermelhos no centro de cada município que participa do programa Conecta Bahia
-- Tooltip ao passar o mouse mostrando nome do município e indicação de pertencimento ao Conecta
+- Municípios participantes do PTI são destacados com a cor do seu território; os demais aparecem esmaecidos em cinza
+- Círculos vermelhos no centro de cada município que participa do programa PTI Bahia
+- Tooltip ao passar o mouse mostrando nome do município e indicação de pertencimento ao PTI
 - Legenda simples explicando o marcador
 
 *Removidas as opções de filtro, seleção e lista lateral – o foco agora é apenas a visualização dos pontos do programa.*
@@ -94,4 +140,4 @@ export default function App() {
 
 - **TopoJSON** (`BA_(1)9396399957704198.json`): geometria vetorial de todos os 417 municípios da Bahia. Fonte: IBGE.
 - **Territórios de Identidade** (`territorioMunicipios.json`): agrupamento dos 27 territórios definidos pela SEPLAN/BA, usado apenas para colorização por território.
-- **Conecta Bahia** (`conectaMunicipios.json`): lista dos municípios atendidos pelo programa; utilizada para posicionar os pontos no mapa.
+- **PTI Bahia** (`ptiMunicipios.json`): lista dos municípios atendidos pelo programa; utilizada para posicionar os pontos no mapa.

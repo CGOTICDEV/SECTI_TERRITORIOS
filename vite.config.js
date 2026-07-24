@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import https from 'https'
 import * as XLSX from 'xlsx'
@@ -8,7 +8,7 @@ import path from 'path'
 let devCache = null;
 let devCacheExpiry = 0;
 const DEV_CACHE_TTL = 30 * 60 * 1000; // 30 minutos
-const CACHE_VERSION = 'v19'; // Atualizado para restaurar categorias (Centros de Pesquisa, etc)
+const CACHE_VERSION = 'v38_aceleradoras_capacidade'; // Atualizado para limpar cache
 
 // ==================== PROCESSADOR DE EXCEL (DEV) ====================
 
@@ -21,47 +21,35 @@ function normalize(value) {
     .trim();
 }
 
-// ==================== O MEGA FILTRO DE ENTIDADES ====================
-function expandirNomeEntidade(nomeRaw, tipoRaw = '') {
-  let nome = String(nomeRaw || '').trim();
-  let tipoNorm = normalize(tipoRaw);
-  
-  // ESCUDO DE PROTEÇÃO: Entidades do Ecossistema não podem ser rebatizadas para Universidades
-  const isEcossistema = ['incubadora', 'parque', 'espaco', 'pesquisa', 'dinamizador', 'ict'].some(term => tipoNorm.includes(term));
-
-  // 1. Normalização profunda para comparação
-  let nomeNorm = String(nome)
+function safeKey(k) {
+  return String(k || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/[^a-z0-9]/g, '');
+}
 
-  // 2. A TESOURA PRÉVIA: Corta o ruído antes de avaliar (Campus, Polos, EAD)
-  nomeNorm = nomeNorm.replace(/\b(campus|polo|unidade|centro de|ead|departamento)\b.*$/g, '').trim();
+function expandirNomeEntidade(nomeRaw, tipoRaw = '', isCadeia = false) {
+  let nome = String(nomeRaw || '').trim();
+  let tipoNorm = normalize(tipoRaw);
+  
+  const isEcossistema = ['incubadora', 'parque', 'espacoDinamizadores', 'pesquisa', 'dinamizador', 'ict', 'aceleradora'].some(term => tipoNorm.includes(term));
 
-  // 3. Dicionário de Mapeamento Direto (Regex -> Nome Oficial)
-  if (!isEcossistema) {
+  if (!isEcossistema && !isCadeia) {
+    let nomeNorm = normalize(nome).replace(/\b(campus|polo|unidade|centro de|ead|departamento)\b.*$/g, '').trim();
+
     const dicionario = [
-      // Federais
       { padrao: /\b(ufba|universidade federal da bahia)\b/, oficial: 'Universidade Federal da Bahia (UFBA)' },
       { padrao: /\b(ufrb|reconcavo da bahia|reconcavo)\b/, oficial: 'Universidade Federal do Recôncavo da Bahia (UFRB)' },
       { padrao: /\b(ufob|oeste da bahia)\b/, oficial: 'Universidade Federal do Oeste da Bahia (UFOB)' },
       { padrao: /\b(ufsb|sul da bahia)\b/, oficial: 'Universidade Federal do Sul da Bahia (UFSB)' },
       { padrao: /\b(univasf|vale do sao francisco)\b/, oficial: 'Universidade Federal do Vale do São Francisco (UNIVASF)' },
-      
-      // Estaduais
       { padrao: /\b(uneb|estado da bahia|estadual da bahia)\b/, oficial: 'Universidade do Estado da Bahia (UNEB)' },
       { padrao: /\b(uesc|santa cruz)\b/, oficial: 'Universidade Estadual de Santa Cruz (UESC)' },
       { padrao: /\b(uesb|sudoeste da bahia|sudoeste)\b/, oficial: 'Universidade Estadual do Sudoeste da Bahia (UESB)' },
       { padrao: /\b(uefs|feira de santana)\b/, oficial: 'Universidade Estadual de Feira de Santana (UEFS)' },
-
-      // Institutos Federais
       { padrao: /\b(ifbaiano|if baiano|tecnologia baiano)\b/, oficial: 'Instituto Federal Baiano (IF BAIANO)' },
       { padrao: /\b(ifba|instituto federal da bahia|ciencia e tecnologia da bahia)\b/, oficial: 'Instituto Federal da Bahia (IFBA)' },
-
-      // Sistema S e Privadas Comuns
       { padrao: /\b(senai|cimatec)\b/, oficial: 'Serviço Nacional de Aprendizagem Industrial (SENAI)' },
       { padrao: /\b(senac)\b/, oficial: 'Serviço Nacional de Aprendizagem Comercial (SENAC)' },
       { padrao: /\b(uninassau|mauricio de nassau)\b/, oficial: 'Centro Universitário Maurício de Nassau (UNINASSAU)' },
@@ -79,26 +67,16 @@ function expandirNomeEntidade(nomeRaw, tipoRaw = '') {
       }
     }
 
-    // 4. Tratamento de fallback (Corrige nomenclaturas caso não seja ecossistema)
     nome = nome.replace(/^UNIVERSI[A-Z]*\s/gi, 'Universidade '); 
     nome = nome.replace(/^INSTITUT[A-Z]*\s/gi, 'Instituto ');
     nome = nome.replace(/^CENTRO U[A-Z]*\s/gi, 'Centro Universitário ');
     nome = nome.replace(/^FACULDA[A-Z]*\s/gi, 'Faculdade ');
   }
   
-  // A Tesoura Final (Serve para todos, limpa Campi e Polos do final da string)
   nome = nome.replace(/\s*[-–|/]\s*(Campus|Polo|Unidade|Centro).*$/i, '');
   nome = nome.replace(/\s+(Campus|Polo|Unidade)\s+.*$/i, '');
   
-  return nome.trim().replace(/\b\w/g, l => l.toUpperCase());
-}
-
-function safeKey(k) {
-  return String(k || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+  return nome.trim();
 }
 
 const toNumber = (value) => {
@@ -122,7 +100,7 @@ function parseSpreadsheet(buffer) {
 
   const workbook = XLSX.read(buffer, {
     type: 'buffer',
-    cellFormula: false,
+    cellFormula: true, 
     cellHTML: false,
     cellStyles: false,
     cellText: false,
@@ -172,7 +150,7 @@ function parseSpreadsheet(buffer) {
         cadeiasRows: [],
         desenvolvimentoRows: [],
         cursosRows: [],
-        desenvolvimento: { ifdmTi: null, somaIfdmPop: 0, populacaoTotal: 0 },
+        desenvolvimento: { ifdmTi: null, somaIfdm: 0, qtdMunicipiosIfdm: 0, populacaoTotal: 0 },
         assistenciaPublica: { existe: false, iniciativas: new Set() },
         semiaridoAcumulado: 0,
         semiaridoContador: 0
@@ -185,86 +163,186 @@ function parseSpreadsheet(buffer) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) return;
 
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const ref = sheet['!ref'];
+    let fonteCols = []; 
+    let headerRow = 0;
+    
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref);
+      headerRow = range.s.r;
+      
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell = sheet[XLSX.utils.encode_cell({c: C, r: headerRow})];
+        if (cell && cell.v) {
+          const headerRaw = safeKey(cell.v);
+          if (['fontedosdados', 'fontedodado', 'fontededados', 'fontedados', 'fonte', 'fontes', 'referencia', 'referencias', 'artigo', 'documento'].includes(headerRaw)) {
+            fonteCols.push(C);
+          }
+        }
+      }
+    }
+
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', blankrows: true });
     if (rawRows.length === 0) return;
 
     const sheetNorm = safeKey(sheetName);
 
+    const isCadeiaSheet = ['cadeiaprodutiva', 'cadeiasprodutivas', 'igpotenciais', 'igspotenciais', 'potenciais', 'producao', 'apl', 'arranjoprodutivo'].some(term => sheetNorm.includes(term)) || sheetNorm === 'ig' || sheetNorm === 'igs';
+    const isCursoSheet = ['curso', 'ensino', 'superior', 'graduacao', 'educacao'].some(term => sheetNorm.includes(term));
+    const isIfdmSheet = ['ifdm', 'desenvolvimento', 'populacao', 'socioecon'].some(term => sheetNorm.includes(term));
+    // AQUI: Adicionado 'aceleradora' para incluir nas lógicas de Capacidade
+    const isCapacidadeSheet = (sheetNorm.includes('capacidade') || sheetNorm.includes('cti') || sheetNorm.includes('infraestrutura') || sheetNorm.includes('entidade') || sheetNorm.includes('aceleradora')) && !isCadeiaSheet && !isCursoSheet && !isIfdmSheet;
+
+    if (!isCadeiaSheet && !isCursoSheet && !isIfdmSheet && !isCapacidadeSheet) return;
+
+    const range = XLSX.utils.decode_range(sheet['!ref']);
+    const headerMap = {};
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cell = sheet[XLSX.utils.encode_cell({ c: C, r: range.s.r })];
+      if (cell && cell.v) {
+        headerMap[safeKey(cell.v)] = C;
+      }
+    }
+
     rawRows.forEach((rawRow, idx) => {
+      const R = range.s.r + 1 + idx;
+      if (Object.values(rawRow).every(v => v === '')) return;
+
       const row = {};
       for (const key in rawRow) {
           row[safeKey(key)] = rawRow[key];
+      }
+      
+      let urlTarget = '';
+      if (fonteCols.length > 0 && isCadeiaSheet) {
+          const excelRow = headerRow + 1 + idx; 
+          for (let colIndex of fonteCols) {
+              const cellAddress = XLSX.utils.encode_cell({ c: colIndex, r: excelRow });
+              const cell = sheet[cellAddress];
+              if (cell) {
+                  if (cell.l && cell.l.Target) {
+                      urlTarget = cell.l.Target; 
+                      break; 
+                  } else if (cell.f) {
+                      const hMatch = String(cell.f).match(/HYPERLINK\s*\(\s*["']([^"']+)["']/i);
+                      if (hMatch) {
+                          urlTarget = hMatch[1]; 
+                          break;
+                      }
+                  }
+              }
+          }
       }
 
       const territorioRaw = row['territoriodeidentidade'] || row['territorioidentidade'] || row['territoriosdeidentidade'] || row['territorio'] || row['territorios'];
       if (!territorioRaw) return;
 
       const territoryNamesList = splitList(territorioRaw);
-      
       const municipio = String(row['municipio'] || row['cidade'] || row['local'] || '').trim();
       const orgAcademica = String(row['orgacademica'] || '').trim();
       const categoriaAdm = String(row['categoriaadm'] || '').trim();
-      
+      const rede = String(row['rede'] || '').trim(); 
       const cabeçalhoColunaA = Object.keys(rawRow)[0]; 
       const valorColunaA = String(rawRow[cabeçalhoColunaA] || '').trim(); 
       
       let entidadeRaw = '';
       let tipoOriginal = '';
 
-      // ==================== EXTRATOR DIRECIONADO PARA CRUZAMENTO ====================
-      if (sheetNorm.includes('curso') || sheetNorm.includes('ensino')) {
-          // Na aba de cursos, o nome vem da coluna Universidade e o tipo de Org_academica
+      if (isCursoSheet) {
           entidadeRaw = String(row['universidade'] || row['ies'] || '').trim();
           tipoOriginal = String(orgAcademica).trim();
+      } else if (isCadeiaSheet) {
+          entidadeRaw = String(row['entidadegestora'] || row['entidade'] || row['associacao'] || '').trim();
+          tipoOriginal = String(row['tipo'] || row['tipodecadeia'] || row['classificacao'] || '').trim();
       } else {
-          entidadeRaw = String(row['entidade'] || row['nomedaentidade'] || row['instituicao'] || row['ies'] || row['sigla'] || valorColunaA).trim();
-          tipoOriginal = String(row['tipo'] || row['tipodecadeia'] || row['classificacao'] || row['categoria'] || row['natureza'] || '').trim();
+          // AQUI: Adicionamos row['nome'] para mapear a coluna da nova planilha de Aceleradoras
+          entidadeRaw = String(row['entidade'] || row['nomedaentidade'] || row['instituicao'] || row['ies'] || row['sigla'] || row['nome'] || valorColunaA).trim();
+          tipoOriginal = String(row['tipo'] || row['categoria'] || row['natureza'] || '').trim();
+          
+          // Se for a aba Aceleradoras e não houver coluna "tipo", forçamos o tipo.
+          if (sheetNorm.includes('aceleradora') && !tipoOriginal) {
+              tipoOriginal = 'Aceleradoras';
+          }
       }
 
-      const entidadesExpandida = expandirNomeEntidade(entidadeRaw, tipoOriginal);
+      const entidadesExpandida = expandirNomeEntidade(entidadeRaw, tipoOriginal, isCadeiaSheet);
       const qtd = toNumber(row['quantidade'] || row['qtd'] || row['qtdenti'] || row['valorentidades'] || 1);
 
       let tipoFinal = tipoOriginal;
       let categoriaEntidade = null;
       let isCTI = false;
+      let descricaoExtraida = '';
+      let siteFinalExtraido = '';
       
-      // ==================== MOTOR DE CLASSIFICAÇÃO RESTAURADO (Com Centros de Pesquisa) ====================
-      if (sheetNorm.includes('capacidade')) {
+      if (isCapacidadeSheet) {
           isCTI = true; 
-          tipoFinal = tipoOriginal; // Mantém o Tipo visual idêntico ao da planilha (ex: "Centro de Pesquisa")
+          tipoFinal = tipoOriginal; 
+
+          // === EXTRAÇÃO DE DESCRIÇÃO E SITE (Exclusivo Capacidade/Aceleradoras) ===
+          descricaoExtraida = String(row['descricao'] || row['resumo'] || row['sobre'] || '').trim();
+          
+          let siteVisualBruto = String(row['site'] || row['website'] || row['link'] || '').trim();
+          let siteHyperlinkEmbutido = '';
+          
+          // Extrai Hiperlink direto da célula caso exista
+          const possibleSiteKeys = ['site', 'website', 'link'];
+          const matchedSiteKey = possibleSiteKeys.find(k => headerMap[k] !== undefined && row[k] !== undefined);
+          if (matchedSiteKey) {
+              const C = headerMap[matchedSiteKey];
+              const cell = sheet[XLSX.utils.encode_cell({ r: R, c: C })];
+              if (cell) {
+                  if (cell.l && cell.l.Target) siteHyperlinkEmbutido = cell.l.Target;
+                  else if (cell.f) {
+                      const hMatch = String(cell.f).match(/HYPERLINK\s*\(\s*["']([^"']+)["']/i);
+                      if (hMatch) siteHyperlinkEmbutido = hMatch[1].trim();
+                  }
+              }
+          }
+          // Monta o URL final dando prioridade ao Hiperlink Nativo
+          siteFinalExtraido = siteHyperlinkEmbutido || (siteVisualBruto.startsWith('http') ? siteVisualBruto : (siteVisualBruto ? `http://${siteVisualBruto}` : ''));
+          // =========================================================================
 
           const tNorm = normalize(tipoOriginal);
+          const isPrivadaCapacidade = tNorm.includes('privada') || tNorm.includes('particular');
           
-          // O mapeamento exato que o teu frontend precisa para não "sumir" com as abas
-          if (['universidade', 'faculdade', 'centro universitario', 'superior'].some(c => tNorm.includes(c))) { categoriaEntidade = 'univs'; }
-          else if (['instituto federal', 'ifba', 'ifbaiano'].some(c => tNorm.includes(c))) { categoriaEntidade = 'ifs'; }
+          if (['universidade', 'faculdade', 'centro universitario', 'superior'].some(c => tNorm.includes(c))) { 
+              categoriaEntidade = isPrivadaCapacidade ? 'campiUniversidadePrivada' : 'campiUniversidadePublica';
+               if (!isPrivadaCapacidade && !tNorm.includes('publica') && !tNorm.includes('federal') && !tNorm.includes('estadual')) {
+                   tipoFinal = tipoFinal ? `${tipoFinal} - Pública` : 'Universidade Pública';
+               }
+          }
+          else if (['instituto federal', 'ifba', 'ifbaiano'].some(c => tNorm.includes(c))) { categoriaEntidade = 'campiInstitutoFederal'; }
           else if (['centro de pesquisa', 'pesquisa'].some(c => tNorm.includes(c))) { categoriaEntidade = 'centrosPesquisa'; }
           else if (['ict'].some(c => tNorm.includes(c))) { categoriaEntidade = 'icts'; }
           else if (['incubadora'].some(c => tNorm.includes(c))) { categoriaEntidade = 'incubadoras'; }
-          else if (['espaco', 'dinamizador'].some(c => tNorm.includes(c))) { categoriaEntidade = 'espacos'; }
-          else if (['parque'].some(c => tNorm.includes(c))) { categoriaEntidade = 'parques'; }
+          else if (['aceleradora'].some(c => tNorm.includes(c) || sheetNorm.includes('aceleradora'))) { categoriaEntidade = 'aceleradoras'; } // NOVA CATEGORIA
+          else if (['espacoDinamizadores', 'dinamizador'].some(c => tNorm.includes(c))) { categoriaEntidade = 'espacoDinamizadoress'; }
+          else if (['parque'].some(c => tNorm.includes(c))) { categoriaEntidade = 'parquesTecnologicos'; }
           else { categoriaEntidade = 'outros'; }
           
-      } else if (sheetNorm.includes('curso') || sheetNorm.includes('ensino')) {
+      } else if (isCursoSheet) {
           isCTI = true; 
           
           const orgNorm = normalize(tipoOriginal);
-          if (['universidade', 'faculdade', 'centro universitario', 'superior'].some(c => orgNorm.includes(c))) { categoriaEntidade = 'univs'; }
-          else if (['instituto federal', 'ifba', 'ifbaiano'].some(c => orgNorm.includes(c))) { categoriaEntidade = 'ifs'; }
+          const catNorm = normalize(`${categoriaAdm} ${rede}`);
+
+          const isPrivada = catNorm.includes('privada') || catNorm.includes('lucrativo') || catNorm.includes('particular');
+
+          if (['universidade', 'faculdade', 'centro universitario', 'superior'].some(c => orgNorm.includes(c))) { 
+              categoriaEntidade = isPrivada ? 'campiUniversidadePrivada' : 'campiUniversidadePublica'; 
+          }
+          else if (['instituto federal', 'ifba', 'ifbaiano'].some(c => orgNorm.includes(c))) { categoriaEntidade = 'campiInstitutoFederal'; }
           else { categoriaEntidade = 'outros'; }
 
-          // Constrói o Tipo de Apresentação (Ex: Universidade - Pública Federal)
           let tipoParts = [tipoOriginal];
-          const catNorm = categoriaAdm.toLowerCase();
-          if (catNorm.includes('privada') || catNorm.includes('lucrativos')) tipoParts.push('Privada');
+          if (isPrivada) tipoParts.push('Privada');
           else if (catNorm.includes('estadual')) tipoParts.push('Pública Estadual');
           else if (catNorm.includes('federal')) tipoParts.push('Pública Federal');
+          else tipoParts.push('Pública');
 
           tipoFinal = tipoParts.filter(Boolean).join(' - ');
       }
-      // =========================================================================================
 
-      // ID Único Blindado
       const uniqueRowId = (entidadesExpandida && municipio) 
           ? `ent_${safeKey(entidadesExpandida)}_${safeKey(municipio)}` 
           : `aba_${sheetNorm}_linha_${idx}`;
@@ -273,10 +351,8 @@ function parseSpreadsheet(buffer) {
          const territory = getTerritory(tName);
          if (!territory) return;
 
-         // 1. INJEÇÃO DE CAPACIDADE TERRITORIAL E CRUZAMENTO
-         if (sheetNorm.includes('capacidade') || sheetNorm.includes('cti') || sheetNorm.includes('ensino') || sheetNorm.includes('curso')) {
+         if (isCapacidadeSheet || isCursoSheet) {
              if (isCTI && entidadesExpandida !== '') {
-                 // SÓ ADICIONA SE AINDA NÃO EXISTIR. A PLANILHA DE CURSOS NÃO SOBRESCREVE NADA.
                  const alreadyExists = territory.capacidadeRows.some(e => e.id === uniqueRowId);
                  if (!alreadyExists) {
                      territory.capacidadeRows.push({
@@ -285,58 +361,82 @@ function parseSpreadsheet(buffer) {
                          entidade: entidadesExpandida,
                          tipo: tipoFinal || 'Instituição', 
                          categoria: categoriaEntidade || 'outros', 
-                         quantidade: qtd
+                         quantidade: qtd,
+                         descricao: descricaoExtraida, // NOVO CAMPO: Guardado na árvore!
+                         site: siteFinalExtraido       // NOVO CAMPO: Guardado na árvore!
                      });
                  }
              }
          }
 
-         // 2. CADEIAS PRODUTIVAS
-         if (sheetNorm.includes('cadeia') || sheetNorm.includes('ig') || sheetNorm.includes('potencial')) {
+         if (isCadeiaSheet) {
              const cadeia = String(row['cadeiaprodutiva'] || row['cadeiasprodutivas'] || row['cadeia'] || row['segmento'] || '').trim();
              if (cadeia !== '') {
                  const sede = String(row['sede'] || row['municipiosatelite'] || '').trim();
                  const abrangencia = String(row['municipiospertencentes'] || row['abrangencia'] || '').trim();
-                 const fonte = String(row['fontedodado'] || row['fonte'] || row['link'] || '').trim();
+                 const fonteRaw = row['fontedosdados'] || row['fontedodado'] || row['fontededados'] || row['fontedados'] || row['fonte'] || row['fontes'] || row['linkdafonte'] || row['linkfonte'] || row['link'] || row['referencia'] || row['referencias'] || row['origem'] || row['origemdosdados'] || '';
+                 
+                 let excelHyperlink = '';
+                 const possibleFonteKeys = ['fontedosdados', 'fontedodado', 'fontededados', 'fontedados', 'fonte', 'fontes', 'linkdafonte', 'linkfonte', 'link', 'referencia', 'referencias', 'origem', 'origemdosdados'];
+                 const matchedKey = possibleFonteKeys.find(k => headerMap[k] !== undefined && row[k] !== undefined);
+                 if (matchedKey) {
+                     const C = headerMap[matchedKey];
+                     const cell = sheet[XLSX.utils.encode_cell({ r: R, c: C })];
+                     if (cell && cell.l && cell.l.Target) {
+                         excelHyperlink = cell.l.Target;
+                     }
+                 }
+
+                 const hMatch = String(fonteRaw).match(/HYPERLINK\s*\(\s*["']([^"']+)["']/i);
+                 const formulaHyperlink = hMatch ? hMatch[1].trim() : '';
+                 const linkOficial = excelHyperlink || formulaHyperlink;
+                 
+                 let fonteFinal = String(fonteRaw).trim();
+                 if (linkOficial) {
+                     fonteFinal = `${fonteFinal} |URL: ${linkOficial}`;
+                 }
+
+                 const semanticId = `cad_${safeKey(cadeia)}_${safeKey(sede)}_${safeKey(entidadesExpandida)}`;
 
                  territory.cadeiasRows.push({
-                     id: `aba_${sheetNorm}_linha_${idx}`,
+                     id: semanticId,
                      segmento: cadeia,
                      sede: sede || abrangencia.split(/[;,]/)[0].trim() || municipio || 'N/A',
                      municipiosPertencentes: abrangencia,
                      entidade: entidadesExpandida, 
                      tipo: tipoOriginal,
                      quantidade: qtd,
-                     fonte
+                     fonte: String(fonteRaw).trim(),      
+                     urlTarget: urlTarget 
                  });
              }
          }
 
-         // 3. DESENVOLVIMENTO (IFDM)
-         if (sheetNorm.includes('desenvolvimento') || sheetNorm.includes('ifdm')) {
+         if (isIfdmSheet) {
              const ifdm = toNumber(row['ifdm']);
              const pop = toNumber(row['populacao']);
-             const ifdmTi = toNumber(row['ifdmt'] || row['ifdmti']);
+             const ifdmTi = toNumber(row['ifdmt2'] || row['ifdmti']);
 
              if (municipio) {
                  territory.desenvolvimentoRows.push({ municipio, ifdm, populacao: pop });
              }
 
-             if (ifdm > 0 && pop > 0) {
-                 territory.desenvolvimento.somaIfdmPop += ifdm * pop;
+             if (ifdm > 0) {
+                 territory.desenvolvimento.somaIfdm += ifdm;
+                 territory.desenvolvimento.qtdMunicipiosIfdm += 1;
+             }
+             if (pop > 0) {
                  territory.desenvolvimento.populacaoTotal += pop;
              }
              if (ifdmTi > 0) territory.desenvolvimento.ifdmTi = ifdmTi;
          }
 
-         // 4. ASSISTÊNCIA PÚBLICA
          const assistencia = String(row['assistenciapublica'] || row['conecta'] || '');
          const iniciativas = String(row['iniciativas'] || row['dispositivosestaduais'] || '');
          if (isTruthy(assistencia)) territory.assistenciaPublica.existe = true;
          if (iniciativas !== '') splitList(iniciativas).forEach(i => territory.assistenciaPublica.iniciativas.add(i));
 
-         // 5. CURSOS EM CT&I
-         if (sheetNorm.includes('curso') || sheetNorm.includes('ensino')) {
+         if (isCursoSheet) {
              const nomeCurso = String(row['curso'] || '').trim();
              if (nomeCurso !== '') {
                  territory.cursosRows.push({
@@ -357,12 +457,11 @@ function parseSpreadsheet(buffer) {
     });
   };
 
-  // ORDENAÇÃO DE ABAS
   const ordenadasSheetNames = [...targetSheetNames].sort((a, b) => {
       const aKey = safeKey(a);
       const bKey = safeKey(b);
-      const aIsMain = aKey.includes('capacidade') || aKey.includes('cti');
-      const bIsMain = bKey.includes('capacidade') || bKey.includes('cti');
+      const aIsMain = aKey.includes('capacidade') || aKey.includes('aceleradora') || (aKey.includes('cti') && !aKey.includes('conecti'));
+      const bIsMain = bKey.includes('capacidade') || bKey.includes('aceleradora') || (bKey.includes('cti') && !bKey.includes('conecti'));
       if (aIsMain && !bIsMain) return -1;
       if (!aIsMain && bIsMain) return 1;
       return 0;
@@ -375,8 +474,8 @@ function parseSpreadsheet(buffer) {
   if (!territoryMap.size) throw new Error('Nenhuma linha territorial válida encontrada.');
 
   const territories = Array.from(territoryMap.values()).map((entry) => {
-    if (entry.desenvolvimento.ifdmTi == null && entry.desenvolvimento.populacaoTotal > 0) {
-      entry.desenvolvimento.ifdmTi = entry.desenvolvimento.somaIfdmPop / entry.desenvolvimento.populacaoTotal;
+    if (entry.desenvolvimento.ifdmTi == null && entry.desenvolvimento.qtdMunicipiosIfdm > 0) {
+      entry.desenvolvimento.ifdmTi = entry.desenvolvimento.somaIfdm / entry.desenvolvimento.qtdMunicipiosIfdm;
     }
 
     const allMunicipios = new Set();
@@ -408,7 +507,7 @@ function parseSpreadsheet(buffer) {
       desenvolvimento: {
         ifdmTi: entry.desenvolvimento.ifdmTi,
         populacaoTotal: entry.desenvolvimento.populacaoTotal || null,
-        metodologia: 'IFDM_TI = soma(IFDM_municipio * populacao_municipio) / soma(populacao_municipio)',
+        metodologia: 'IFDM_TI = Média Aritmética Simples',
       },
       assistenciaPublica: {
         existe: entry.assistenciaPublica.existe,
@@ -435,23 +534,16 @@ function parseSpreadsheet(buffer) {
     },
   };
 
-  console.log(`[Dev Parser] ✓ Parseado: ${result.summary.territories} territórios`);
-
   try {
     const publicDir = path.join(process.cwd(), 'public');
     if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
     fs.writeFileSync(path.join(publicDir, 'dados.json'), JSON.stringify(result, null, 2));
-    console.log(`[Dev Parser] 💾 JSON Salvo Localmente.`);
-  } catch (err) { 
-    console.warn(`[Dev Parser] Falha ao salvar JSON local: ${err.message}`); 
-  }
+  } catch (err) {}
 
   return result;
 }
 
-// ==================== FIM DO PROCESSADOR ====================
-
-const sharepointProxyPlugin = () => ({
+const sharepointProxyPlugin = (targetSharepointUrl) => ({
   name: 'sharepoint-proxy',
   configureServer(server) {
     server.middlewares.use('/api/sharepoint', async (req, res) => {
@@ -466,7 +558,7 @@ const sharepointProxyPlugin = () => ({
         return;
       }
 
-      let downloadUrl = 'https://prodeboffice365-my.sharepoint.com/:x:/g/personal/sdc_secti_ba_gov_br/IQCUmr5J0kxUQLKb9lRqZkT_AVOgJRieO_TN9lJiRxUzXI8?download=1';
+      let downloadUrl = targetSharepointUrl || process.env.VITE_SHAREPOINT_URL || 'https://prodeboffice365-my.sharepoint.com/:x:/g/personal/sdc_secti_ba_gov_br/IQCUmr5J0kxUQLKb9lRqZkT_AVOgJRieO_TN9lJiRxUzXI8?download=1';
       if (!downloadUrl.includes('web=0')) downloadUrl += '&action=default&web=0';
 
       https.get(downloadUrl, {
@@ -530,24 +622,29 @@ function sendError(res, statusCode, message) {
   res.end(JSON.stringify({ error: 'Erro de Proxy', message }));
 }
 
-export default defineConfig({
-  plugins: [react(), sharepointProxyPlugin()],
-  build: {
-    target: 'es2015',
-    minify: 'esbuild',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-xlsx': ['xlsx'],
-          'vendor-topojson': ['topojson-client'],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const sharepointUrl = env.VITE_SHAREPOINT_URL || process.env.VITE_SHAREPOINT_URL || 'https://prodeboffice365-my.sharepoint.com/:x:/g/personal/sdc_secti_ba_gov_br/IQCUmr5J0kxUQLKb9lRqZkT_AVOgJRieO_TN9lJiRxUzXI8?download=1';
+
+  return {
+    plugins: [react(), sharepointProxyPlugin(sharepointUrl)],
+    build: {
+      target: 'es2015',
+      minify: 'esbuild',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-xlsx': ['xlsx'],
+            'vendor-topojson': ['topojson-client'],
+          },
         },
       },
+      chunkSizeWarningLimit: 1000,
     },
-    chunkSizeWarningLimit: 1000,
-  },
-  server: { hmr: { overlay: true } },
-  optimizeDeps: {
-    include: ['react', 'react-dom', 'xlsx', 'topojson-client'],
-  },
+    server: { hmr: { overlay: true } },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'xlsx', 'topojson-client'],
+    },
+  };
 });
