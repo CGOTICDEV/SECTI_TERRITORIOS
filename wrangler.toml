@@ -1,0 +1,5 @@
+name = "sharepoint-worker"
+compatibility_date = "2024-01-01"
+
+[env.production.vars]
+ACCOUNT_ID = "6187c5d470a88a96879b4054a1065b62"

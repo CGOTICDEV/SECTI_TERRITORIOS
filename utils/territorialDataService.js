@@ -10,7 +10,7 @@ const CACHE_DURATION = 1000 * 60 * 60;
 
 const SHAREPOINT_PROXY_URL = import.meta.env.DEV
   ? '/api/sharepoint'
-  : '/.netlify/functions/sharepoint';
+  : 'https://secti-territorios-functions.arthurfaleta52.workers.dev/api/sharepoint';
 
 function normalizeText(value) {
   return String(value || '')

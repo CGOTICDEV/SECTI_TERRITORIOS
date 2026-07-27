@@ -8,7 +8,7 @@ const CACHE_DURATION = 1000 * 60 * 60; // 1 hora em milissegundos
 
 const SHAREPOINT_PROXY_URL = import.meta.env.DEV
   ? '/api/sharepoint'
-  : '/.netlify/functions/sharepoint';
+  : 'https://secti-territorios-functions.arthurfaleta52.workers.dev/api/sharepoint';
 
 const FINANCIAL_PATTERNS = [
   'recurso',
