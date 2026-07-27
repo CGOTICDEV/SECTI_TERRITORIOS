@@ -1,16 +1,7 @@
 [build]
-  command = "cd .netlify/functions && npm install && cd ../.. && npm run build"
-  functions = ".netlify/functions"
+  command = "npm run build"
   publish = "dist"
 
-[functions]
-  node_bundler = "esbuild"
-  external_node_modules = ["@netlify/blobs"]
-
-# Agendador: mantém o Blob sempre fresco → usuários nunca esperam 25s
-[functions."sharepoint-refresh"]
-  schedule = "*/30 * * * *"
-  
 # Headers otimizados para performance
 [[headers]]
   for = "/*"
@@ -51,11 +42,6 @@
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
 [[headers]]
-  for = "/.netlify/functions/*"
-  [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
-
-[[headers]]
   for = "/sw.js"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
@@ -63,7 +49,13 @@
   
 [[redirects]]
   from = "/api/sharepoint"
-  to = "/.netlify/functions/sharepoint"
+  to = "https://sharepoint-worker.arthurfaleta52.workers.dev/api/sharepoint"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/sharepoint-refresh"
+  to = "https://sharepoint-refresh-worker.arthurfaleta52.workers.dev/sharepoint-refresh"
   status = 200
   force = true
 

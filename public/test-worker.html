@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste Cloudflare Worker</title>
+</head>
+<body>
+    <h1>Teste de Conexão com Cloudflare Worker</h1>
+    <button onclick="testWorker()">Testar Worker</button>
+    <div id="result"></div>
+
+    <script>
+        async function testWorker() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testando...';
+            
+            try {
+                const response = await fetch('https://secti-territorios-functions.arthurfaleta52.workers.dev/api/sharepoint');
+                const data = await response.json();
+                resultDiv.innerHTML = `
+                    <h3>✅ Sucesso!</h3>
+                    <p>Status: ${response.status}</p>
+                    <p>Response: ${JSON.stringify(data, null, 2)}</p>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Erro:</h3>
+                    <p>${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

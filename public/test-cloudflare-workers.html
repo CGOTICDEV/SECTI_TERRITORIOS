@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste Cloudflare Workers</title>
+</head>
+<body>
+    <h1>Teste de Conexão com Cloudflare Workers</h1>
+    
+    <h2>Testar SharePoint Worker:</h2>
+    <button onclick="testSharePointWorker()">Testar /api/sharepoint</button>
+    <div id="sharepoint-result"></div>
+    
+    <h2>Testar Status do Worker:</h2>
+    <button onclick="testWorkerStatus()">Testar Status</button>
+    <div id="status-result"></div>
+
+    <script>
+        async function testSharePointWorker() {
+            const resultDiv = document.getElementById('sharepoint-result');
+            resultDiv.innerHTML = 'Testando SharePoint Worker...';
+            
+            try {
+                const response = await fetch('https://secti-territorios-functions.arthurfaleta52.workers.dev/api/sharepoint');
+                const data = await response.json();
+                resultDiv.innerHTML = `
+                    <h3>✅ Sucesso!</h3>
+                    <p>Status: ${response.status}</p>
+                    <p>Content-Type: ${response.headers.get('content-type')}</p>
+                    <p>X-Content-Source: ${response.headers.get('x-content-source')}</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Erro:</h3>
+                    <p>${error.message}</p>
+                    <p>Verifique se o Worker está deployado e acessível</p>
+                `;
+            }
+        }
+        
+        async function testWorkerStatus() {
+            const resultDiv = document.getElementById('status-result');
+            resultDiv.innerHTML = 'Testando status do Worker...';
+            
+            try {
+                const response = await fetch('https://secti-territorios-functions.arthurfaleta52.workers.dev/');
+                const data = await response.text();
+                resultDiv.innerHTML = `
+                    <h3>✅ Worker Respondendo!</h3>
+                    <p>Status: ${response.status}</p>
+                    <p>Response: ${data.substring(0, 200)}...</p>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Erro:</h3>
+                    <p>${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
